@@ -6,7 +6,7 @@
 /*   By: hpottier <hpottier@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/02/18 16:58:54 by hpottier          #+#    #+#             */
-/*   Updated: 2022/03/15 16:47:37 by hpottier         ###   ########.fr       */
+/*   Updated: 2022/03/15 21:56:26 by hpottier         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -138,6 +138,46 @@ static hpage	*new_heap(const int pagesize, size_t alloc_max_size, hchunk **bins)
 	return ((hpage *)nheap);
 }
 
+static hchunk	*find_chunk(size_t size, hpage *heap, hchunk *bins, size_t alloc_max_size, size_t bin_size)
+{
+	hchunk *curr;
+	size_t bindex = (size - 2 * sizeof(size_t)) / 16 - 1;
+
+	while (bindex < bin_size && bins[bindex] == NULL)
+		++bindex;
+	if (bindex == bin_size)
+	{
+		hpage *pcurr = heap;
+		while (pcurr->next != NULL)
+			pcurr = pcurr->next;
+		pcurr->next = new_heap(pagesize, alloc_max_size, bins);
+		if (pcurr->next == NULL)
+			return (NULL);
+	}
+	else
+	{
+		do
+		{
+			curr = bins[bindex];
+			while (curr->next != NULL && (get_infos_size(curr->next->infos) - 2 * sizeof(size_t)) <= size)
+				curr = curr->next;
+			if (curr->next == NULL)
+			{
+				while (bindex < bin_size && bins[bindex] == NULL)
+					++bindex;
+			}
+		} while (curr->next == NULL && bins[bindex] != NULL);
+		if (curr->next == NULL)
+			; // Ajouter une nouvelle page
+		else
+		{
+			curr = curr->next;
+			; // Peut-être retirer ici curr des bins
+		}
+	}
+	return (curr);
+}
+
 void	*malloc(size_t size)
 {
 	write(1, "malloc\n", 7);
@@ -157,12 +197,10 @@ void	*malloc(size_t size)
 			if (theap == NULL)
 				return (NULL);
 		}
-		size_t bindex = (size - 2 * sizeof(size_t)) / 16 - 1;
-		while (tbins[bindex] == NULL)
-			++bindex;
-		hchunk *curr = tbins[bindex]; // Verifier si tbins[bindex] n'est pas NULL
-		while (curr->next != NULL && (get_infos_size(curr->next->infos) - 2 * sizeof(size_t)) <= size)
-			curr = curr->next;
+		hchunk *curr = find_chunk(size, theap, tbins, TINY_MAX, TBINS_SIZE);
+		if (curr == NULL)
+			return (NULL);
+		; // Ici split le chunk dans curr
 	}
 	else if (0 && size <= SMALL_MAX)
 	{
@@ -174,19 +212,22 @@ void	*malloc(size_t size)
 			if (sheap == NULL)
 				return (NULL);
 		}
-		; // Chercher dans les sbins
+		hchunk *curr = find_chunk(size, sheap, sbins, SMALL_MAX, SBINS_SIZE);
+		if (curr == NULL)
+			return (NULL);
+		; // Ici split le chunk dans curr
 	}
 	else
 	{
 		write(1, "mlarge\n", 7);
-		size_t large_size = size + sizeof(hpage); // Verifier overflow
+		size_t large_size = size + sizeof(hpage); // Vérifier overflow
 		large_size = large_size + pagesize - (large_size % pagesize);
 		ret = mmap(NULL, large_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 		if (ret == MAP_FAILED)
 			return (NULL);
-		ret->infos = large_size;
-		set_large(ret->infos);
-		ret->next = NULL;
+		((hpage *)ret)->infos = large_size;
+		set_large(((hpage *)ret)->infos);
+		((hpage *)ret)->next = NULL;
 		if (lheap == NULL)
 			lheap = (hpage *)ret;
 		else
@@ -206,7 +247,7 @@ void	free(void *ptr)
 	write(1, "free\n", 5);
 	if (ptr != NULL)
 	{
-		size_t infos = get_infos_from_ptr(ptr); // Verifier si bien alloue pour tester avec certains programmes
+		size_t infos = get_infos_from_ptr(ptr); // Vérifier si bien alloué pour tester avec certains programmes
 		if (is_large(infos) == 1)
 		{
 			write(1, "flarge\n", 7);
@@ -228,12 +269,12 @@ void	free(void *ptr)
 		else if (is_small(infos) == 1)
 		{
 			write(1, "fsmall\n", 7);
-			; // Liberer le chunk et defragmenter si possible
+			; // Libérer le chunk et défragmenter si possible
 		}
 		else
 		{
 			write(1, "ftiny\n", 6);
-			; // Liberer le chunk et defragmenter si possible
+			; // Libérer le chunk et défragmenter si possible
 		}
 	}
 	else
