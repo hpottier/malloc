@@ -6,7 +6,7 @@
 /*   By: hpottier <hpottier@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/02/23 11:56:26 by hpottier          #+#    #+#             */
-/*   Updated: 2022/02/24 15:06:02 by hpottier         ###   ########.fr       */
+/*   Updated: 2022/03/16 03:39:53 by hpottier         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -19,7 +19,7 @@
 
 int main()
 {
-	int *arr = (int *)xmalloc(ARR_SIZE * sizeof(int));
+	int *arr = (int *)malloc(ARR_SIZE * sizeof(int));
 
 	printf("arr = %p\n", arr);
 	if (arr == NULL)
@@ -33,6 +33,6 @@ int main()
 	{
 		printf("%d\n", arr[i]);
 	}
-	xfree(arr);
+	free(arr);
 	return (0);
 }

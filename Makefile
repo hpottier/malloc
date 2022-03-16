@@ -6,7 +6,7 @@
 #    By: hpottier <hpottier@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2022/02/18 16:38:19 by hpottier          #+#    #+#              #
-#    Updated: 2022/02/24 15:15:45 by hpottier         ###   ########.fr        #
+#    Updated: 2022/03/16 01:15:18 by hpottier         ###   ########.fr        #
 #                                                                              #
 #******************************************************************************#
 
@@ -57,7 +57,7 @@ fclean			:	clean
 						@$(ECHO) "\033[94m> Libft_malloc cleaned all\033[0m"
 
 test			:
-						$(CC) -I$(DIRHDR) -c $(DIRSRC)/malloc.c -o $(OBJD)/malloc.o && $(CC) -I $(DIRHDR) $(OBJD)/malloc.o main.c && ./a.out
+						$(CC) -g3 -I$(DIRHDR) -c $(DIRSRC)/malloc.c -o $(OBJD)/malloc.o && $(CC) -I $(DIRHDR) $(OBJD)/malloc.o maintest.c && ./a.out
 
 re				:	fclean all
 
