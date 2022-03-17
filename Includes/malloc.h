@@ -13,6 +13,8 @@
 #ifndef MALLOC_H
 # define MALLOC_H
 
+# include <stdint.h>
+# include <errno.h>
 # include <sys/mman.h>
 # include <unistd.h>
 # include <sys/time.h>

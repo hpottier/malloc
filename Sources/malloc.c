@@ -6,7 +6,7 @@
 /*   By: hpottier <hpottier@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/02/18 16:58:54 by hpottier          #+#    #+#             */
-/*   Updated: 2022/03/17 20:19:57 by hpottier         ###   ########.fr       */
+/*   Updated: 2022/03/17 21:20:32 by hpottier         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -62,8 +62,8 @@ typedef struct	heap_page
 
 #define get_infos_size(infos) (infos & ~(INUSE_BIT | SMALL_BIT | INUSE_BIT | END_BIT))
 
-/* #define next_chunk(chunk) ((hchunk *)((unsigned char *)chunk + get_infos_size(chunk->infos) + sizeof(size_t) * 2)) */
-/* #define prev_chunk(chunk) ((hchunk *)((unsigned char *)chunk - (get_infos_size(chunk->infos) + sizeof(size_t) * 2))) */
+#define next_chunk(chunk) ((hchunk *)((unsigned char *)chunk + get_infos_size(chunk->infos) + sizeof(size_t) * 2))
+#define prev_chunk(chunk) ((hchunk *)((unsigned char *)chunk - (get_infos_size(chunk->infos) + sizeof(size_t) * 2)))
 
 #define get_chunk_tail(chunk) (((hchunk *)((unsigned char *)chunk + (sizeof(size_t) * 2) + get_infos_size(chunk->infos)))->prev_tail)
 
@@ -228,10 +228,8 @@ static void	split_chunk(hchunk *elem, size_t size, hchunk **bins)
 	hchunk *split = (hchunk *)((unsigned char *)elem + sizeof(size_t) * 2 + size);
 
 	split->prev_tail = size;
-	set_inuse(split->prev_tail);
 	split->infos = get_infos_size(elem->infos) - size - sizeof(size_t) * 2;
 	elem->infos = size;
-	set_inuse(elem->infos);
 	if (is_end(get_chunk_tail(split)))
 	{
 		get_chunk_tail(split) = split->infos;
@@ -290,11 +288,16 @@ void	*malloc(size_t size)
 			if (theap == NULL)
 				return (NULL);
 		}
+
 		hchunk *curr = find_chunk(size, theap, tbins, TINY_MAX, TBINS_SIZE, pagesize);
 		if (curr == NULL)
 			return (NULL);
+
 		if (get_infos_size(curr->infos) - size >= sizeof(hchunk))
 			split_chunk(curr, size, tbins);
+		set_inuse(curr->infos);
+		set_inuse(get_chunk_tail(curr));
+
 		ret = (void *)(curr + (sizeof(size_t) * 2));
 	}
 	else if (0 && size <= SMALL_MAX)
@@ -307,26 +310,47 @@ void	*malloc(size_t size)
 			if (sheap == NULL)
 				return (NULL);
 		}
+
 		hchunk *curr = find_chunk(size, sheap, sbins, SMALL_MAX, SBINS_SIZE, pagesize);
 		if (curr == NULL)
 			return (NULL);
+
 		if (get_infos_size(curr->infos) - size >= sizeof(hchunk))
 			split_chunk(curr, size, sbins);
+		set_inuse(curr->infos);
+		set_inuse(get_chunk_tail(curr));
 		set_small(curr->infos);
+
 		ret = (void *)(curr + (sizeof(size_t) * 2));
 	}
 	else
 	{
 		/* If size is over SMALL_MAX just return a new map of the correct size */
 		write(1, "mlarge\n", 7);
-		size_t large_size = size + sizeof(hpage); // Vérifier overflow
-		large_size = large_size + pagesize - (large_size % pagesize);
+
+		/* Dealing with overflows */
+		if (size > SIZE_MAX - sizeof(hpage))
+		{
+			errno = ENOMEM;
+			return (NULL);
+		}
+		size_t large_size = size + sizeof(hpage);
+		large_size = large_size - (large_size % pagesize);
+		if (SIZE_MAX - large_size > pagesize)
+		{
+			errno = ENOMEM;
+			return (NULL);
+		}
+		large_size = large_size + pagesize;
+
 		ret = mmap(NULL, large_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 		if (ret == MAP_FAILED)
 			return (NULL);
+
 		((hpage *)ret)->infos = large_size;
 		set_large(((hpage *)ret)->infos);
 		((hpage *)ret)->next = NULL;
+
 		if (lheap == NULL)
 			lheap = (hpage *)ret;
 		else
@@ -336,6 +360,7 @@ void	*malloc(size_t size)
 				curr = curr->next;
 			curr->next = (hpage *)ret;
 		}
+
 		ret = (unsigned char *)ret + sizeof(hpage);
 	}
 	return (ret);
@@ -359,6 +384,8 @@ void	free(void *ptr)
 				{
 					if (prev != NULL)
 						prev->next = curr->next;
+					if (munmap(ptr, get_infos_size(page->infos)) < 0)
+						prev->next = curr;
 					return;
 				}
 				prev = curr;
@@ -368,7 +395,18 @@ void	free(void *ptr)
 		else if (is_small(infos) == 1)
 		{
 			write(1, "fsmall\n", 7);
-			; // Libérer le chunk et défragmenter si possible
+			hchunk *chunk = get_chunk(ptr);
+			if (is_inuse(chunk->prev_tail) == 0)
+			{
+				; // Défragmenter le chunk d'avant
+			}
+			; // Vérifier si le chunk n'est pas à la fin de a page avant de regarder le chunk d'après
+			if (is_inuse(chunk->prev_tail) == 0)
+			{
+				; // Défragmenter le chunk d'après
+			}
+			; // Vérifier si la page entière est vide et si c'est le cas tout munmap()
+			; // Sinon simplement rajouter dans les bins le nouveau chunk
 		}
 		else
 		{

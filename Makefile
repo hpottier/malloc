@@ -6,7 +6,7 @@
 #    By: hpottier <hpottier@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2022/02/18 16:38:19 by hpottier          #+#    #+#              #
-#    Updated: 2022/03/16 01:15:18 by hpottier         ###   ########.fr        #
+#    Updated: 2022/03/17 20:55:20 by hpottier         ###   ########.fr        #
 #                                                                              #
 #******************************************************************************#
 
@@ -27,7 +27,7 @@ SRC				=	malloc.c
 OBJ				=	$(SRC:.c=.o)
 OBJS			=	$(OBJ:%=$(OBJD)/%)
 
-CFLAGS			=	-Wall -Wextra -pedantic -pipe -O3
+CFLAGS			=	-Wall -Wextra -pedantic -pipe
 
 CC				=	gcc
 RM				=	rm -rf
