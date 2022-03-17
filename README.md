@@ -1,2 +1,2 @@
 # malloc
-An implementation of malloc(), realloc() and free() as project for the 42 School.
+An implementation of malloc(), free(), realloc() and calloc() as project for the 42 School.
