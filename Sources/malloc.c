@@ -6,7 +6,7 @@
 /*   By: hpottier <hpottier@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/02/18 16:58:54 by hpottier          #+#    #+#             */
-/*   Updated: 2022/03/16 03:39:08 by hpottier         ###   ########.fr       */
+/*   Updated: 2022/03/17 20:19:57 by hpottier         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -395,6 +395,42 @@ void	*realloc(void *ptr, size_t size)
 
 	free(ptr);
 
+	return (ret);
+}
+
+void	*calloc(size_t nmemb, size_t size)
+{
+	if (nmemb == 0 || size == 0 || nmemb > SIZE_MAX / size) // (nmemb * size) / nmemb != size
+		return (NULL);
+
+	void *ret = malloc(nmemb * size);
+	if (ret == NULL)
+		return (NULL);
+
+	size_t x = 0;
+	switch (size)
+	{
+	case sizeof(size_t):
+		while (x < nmemb)
+		{
+			((size_t *)ret)[x] = 0;
+			++x;
+		}
+		break;
+	case sizeof(unsigned int):
+		while (x < nmemb)
+		{
+			((unsigned int *)ret)[x] = 0;
+			++x;
+		}
+		break;
+	default:
+		while (x < nmemb)
+		{
+			((unsigned char *)ret)[x] = 0;
+			++x;
+		}
+	}
 	return (ret);
 }
 
