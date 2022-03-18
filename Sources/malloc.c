@@ -6,7 +6,7 @@
 /*   By: hpottier <hpottier@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/02/18 16:58:54 by hpottier          #+#    #+#             */
-/*   Updated: 2022/03/17 21:20:32 by hpottier         ###   ########.fr       */
+/*   Updated: 2022/03/18 06:58:09 by hpottier         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -62,8 +62,8 @@ typedef struct	heap_page
 
 #define get_infos_size(infos) (infos & ~(INUSE_BIT | SMALL_BIT | INUSE_BIT | END_BIT))
 
-#define next_chunk(chunk) ((hchunk *)((unsigned char *)chunk + get_infos_size(chunk->infos) + sizeof(size_t) * 2))
-#define prev_chunk(chunk) ((hchunk *)((unsigned char *)chunk - (get_infos_size(chunk->infos) + sizeof(size_t) * 2)))
+#define next_chunk(chunk) ((hchunk *)((unsigned char *)chunk + get_infos_size(chunk->infos) - (sizeof(hchunk *) * 2)))
+#define prev_chunk(chunk) ((hchunk *)((unsigned char *)chunk - get_infos_size(chunk->prev_tail) - (sizeof(size_t) * 2)))
 
 #define get_chunk_tail(chunk) (((hchunk *)((unsigned char *)chunk + (sizeof(size_t) * 2) + get_infos_size(chunk->infos)))->prev_tail)
 
@@ -71,6 +71,8 @@ typedef struct	heap_page
 
 #define get_chunk(ptr) ((hchunk *)((unsigned char *)ptr - sizeof(hchunk)))
 #define get_large_chunk(ptr) ((hpage *)((unsigned char *)ptr - sizeof(hpage)))
+
+#define get_chunk_page(chunk) ((hpage *)((unsigned char *)chunk - sizeof(hpage *)))
 
 static hpage *theap = NULL;
 static hpage *sheap = NULL;
@@ -89,6 +91,35 @@ static void	bzero_bins(hchunk **bins, size_t size)
 	{
 		*bins = NULL;
 		++bins;
+	}
+}
+
+static void	add_chunk_to_bins(size_t size, size_t bin_size, hchunk **bins, hchunk *chunk)
+{
+	size_t bindex = size / 16 - 1;
+	if (bindex >= bin_size)
+		bindex = bin_size - 1;
+	if (bins[bindex] == NULL)
+	{
+		bins[bindex] = chunk;
+		chunk->next = NULL;
+		chunk->prev = NULL;
+	}
+	else
+	{
+		hchunk *curr = bins[bindex];
+		if (get_infos_size(curr->infos) > get_infos_size(chunk->infos))
+			while (curr->next != NULL && get_infos_size(curr->next->infos) <= get_infos_size(chunk->infos))
+				curr = curr->next;
+		if (curr->next != NULL)
+		{
+			curr->next->prev = chunk;
+			chunk->next = curr->next;
+		}
+		else
+			chunk->next = NULL;
+		curr->next = chunk;
+		chunk->prev = curr;
 	}
 }
 
@@ -117,31 +148,8 @@ static hpage	*new_heap(const int pagesize, size_t alloc_max_size, hchunk **bins,
 	set_end(get_chunk_tail(chunk));
 
 	/* Add chunk to bins */
-	size_t bindex = size / 16 - 1;
-	if (bindex >= bin_size)
-		bindex = bin_size - 1;
-	if (bins[bindex] == NULL)
-	{
-		bins[bindex] = chunk;
-		chunk->next = NULL;
-		chunk->prev = NULL;
-	}
-	else
-	{
-		hchunk *curr = bins[bindex];
-		if (get_infos_size(curr->infos) > get_infos_size(chunk->infos))
-		while (curr->next != NULL && get_infos_size(curr->next->infos) <= get_infos_size(chunk->infos))
-			curr = curr->next;
-		if (curr->next != NULL)
-		{
-			curr->next->prev = chunk;
-			chunk->next = curr->next;
-		}
-		else
-			chunk->next = NULL;
-		curr->next = chunk;
-		chunk->prev = curr;
-	}
+	add_chunk_to_bins(size, bin_size, bins, chunk);
+
 	return ((hpage *)nheap);
 }
 
@@ -174,8 +182,9 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 		++bindex;
 
 	/* If no bin found, create new page */
-	if (bindex == bin_size)
+	if (bindex >= bin_size)
 	{
+	write(1, "A\n", 2);
 		hpage *pcurr = heap;
 		while (pcurr->next != NULL)
 			pcurr = pcurr->next;
@@ -191,13 +200,13 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 		do
 		{
 			curr = bins[bindex];
+	write(1, "G\n", 2);
 			while (curr->next != NULL && get_infos_size(curr->next->infos) <= size)
 				curr = curr->next;
+	write(1, "H\n", 2);
 			if (curr->next == NULL && get_infos_size(curr->infos) < size)
-			{
-				while (bindex < bin_size && bins[bindex] == NULL)
-					++bindex;
-			}
+				while (++bindex < bin_size && bins[bindex] == NULL)
+					;
 		} while (get_infos_size(curr->infos) < size && bindex < bin_size);
 
 		/* If no chunk of the correct size is found, create new page */
@@ -336,7 +345,7 @@ void	*malloc(size_t size)
 		}
 		size_t large_size = size + sizeof(hpage);
 		large_size = large_size - (large_size % pagesize);
-		if (SIZE_MAX - large_size > pagesize)
+		if (SIZE_MAX - large_size > (size_t)pagesize)
 		{
 			errno = ENOMEM;
 			return (NULL);
@@ -364,6 +373,93 @@ void	*malloc(size_t size)
 		ret = (unsigned char *)ret + sizeof(hpage);
 	}
 	return (ret);
+}
+
+static void	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage *heap)
+{
+	if (is_inuse(chunk->prev_tail) == 0)
+	{
+		/* Defragments with previous chunk */
+		hchunk *prev = prev_chunk(chunk);
+
+		prev->infos = get_infos_size(prev->infos) + get_infos_size(chunk->infos);
+		if (is_end(get_chunk_tail(chunk)))
+		{
+			get_chunk_tail(chunk) = prev->infos;
+			set_end(get_chunk_tail(chunk));
+		}
+		else
+			get_chunk_tail(chunk) = prev->infos;
+		if (prev->next != NULL)
+			prev->next->prev = prev->prev;
+		if (prev->prev != NULL)
+			prev->prev->next = prev->next;
+		else
+		{
+			size_t bindex = prev->infos / 16 - 1;
+			bins[bindex] = NULL;
+		}
+		chunk = prev;
+	}
+
+	if (is_end(get_chunk_tail(chunk)) == 0)
+	{
+		if (is_inuse(chunk->prev_tail) == 0)
+		{
+			/* Defragments with next chunk */
+			hchunk *next = next_chunk(chunk);
+
+			chunk->infos = get_infos_size(chunk->infos) + get_infos_size(next->infos);
+			if (is_end(get_chunk_tail(next)))
+			{
+				get_chunk_tail(next) = chunk->infos;
+				set_end(get_chunk_tail(next));
+			}
+			else
+				get_chunk_tail(next) = chunk->infos;
+			if (next->next != NULL)
+				next->next->prev = next->prev;
+			if (next->prev != NULL)
+				next->prev->next = next->next;
+			else
+			{
+				size_t bindex = chunk->infos / 16 - 1;
+				bins[bindex] = NULL;
+			}
+		}
+	}
+
+	/* Check if the page is empty and there is more than one page in the heap */
+	if (is_end(get_chunk_tail(chunk)))
+	{
+		/* If so, munmaps it */
+		hpage *p = get_chunk_page(chunk);
+		hpage *curr = heap;
+		hpage *prev = curr;
+
+		while (curr != NULL)
+		{
+			if (curr == p)
+			{
+				if (curr->next != NULL || heap != curr)
+				{
+					if (heap == curr)
+						heap = curr->next;
+					prev->next = curr->next;
+					if (munmap(curr, get_infos_size(curr->infos)) < 0)
+					{
+						if (heap == curr->next)
+							heap = curr;
+						prev->next = curr;
+					}
+					return;
+				}
+				break;
+			}
+			prev = curr;
+			curr = curr->next;
+		}
+	}
 }
 
 void	free(void *ptr)
@@ -396,22 +492,21 @@ void	free(void *ptr)
 		{
 			write(1, "fsmall\n", 7);
 			hchunk *chunk = get_chunk(ptr);
-			if (is_inuse(chunk->prev_tail) == 0)
-			{
-				; // Défragmenter le chunk d'avant
-			}
-			; // Vérifier si le chunk n'est pas à la fin de a page avant de regarder le chunk d'après
-			if (is_inuse(chunk->prev_tail) == 0)
-			{
-				; // Défragmenter le chunk d'après
-			}
-			; // Vérifier si la page entière est vide et si c'est le cas tout munmap()
-			; // Sinon simplement rajouter dans les bins le nouveau chunk
+
+			free_ts_chunk(chunk, sbins, sheap);
+
+			/* Otherwise add the new chunk to the bins */
+			add_chunk_to_bins(get_infos_size(chunk->infos), SBINS_SIZE, sbins, chunk);
 		}
 		else
 		{
 			write(1, "ftiny\n", 6);
-			; // Libérer le chunk et défragmenter si possible
+			hchunk *chunk = get_chunk(ptr);
+
+			free_ts_chunk(chunk, sbins, sheap);
+
+			/* Otherwise add the new chunk to the bins */
+			add_chunk_to_bins(get_infos_size(chunk->infos), SBINS_SIZE, sbins, chunk);
 		}
 	}
 	else
@@ -420,12 +515,30 @@ void	free(void *ptr)
 
 void	*realloc(void *ptr, size_t size)
 {
+	write(1, "realloc\n", 8);
+
+	size_t ptr_size = 0;
+	if (ptr != NULL)
+	{
+		size_t infos = get_infos_from_ptr(ptr); // Vérifier si bien alloué pour tester avec certains programmes
+		ptr_size = get_infos_size(infos);
+
+		if (is_small(infos))
+		{
+			; // Regarder si le chunk suivant à assez de place
+		}
+		else if (is_large(infos) == 0)
+		{
+			; // Regarder si le chunk suivant à assez de place
+		}
+	}
+
 	void *ret = malloc(size);
 	if (ret == NULL)
 		return (NULL);
-	
+
 	size_t x = 0;
-	while (x < size)
+	while (x < ptr_size)
 	{
 		((unsigned char *)ret)[x] = ((unsigned char *)ptr)[x];
 		++x;
@@ -438,6 +551,7 @@ void	*realloc(void *ptr, size_t size)
 
 void	*calloc(size_t nmemb, size_t size)
 {
+	write(1, "calloc\n", 7);
 	if (nmemb == 0 || size == 0 || nmemb > SIZE_MAX / size) // (nmemb * size) / nmemb != size
 		return (NULL);
 
@@ -472,12 +586,12 @@ void	*calloc(size_t nmemb, size_t size)
 	return (ret);
 }
 
-void	show_alloc_mem()
+void	show_alloc_mem(void)
 {
 	write(1, "show_alloc_mem()\n", 17);
 }
 
-void	show_alloc_mem_ex()
+void	show_alloc_mem_ex(void)
 {
 	write(1, "show_alloc_mem_ex()\n", 20);
 }
