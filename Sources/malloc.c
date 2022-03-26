@@ -6,7 +6,7 @@
 /*   By: hpottier <hpottier@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/02/18 16:58:54 by hpottier          #+#    #+#             */
-/*   Updated: 2022/03/18 06:58:09 by hpottier         ###   ########.fr       */
+/*   Updated: 2022/03/26 09:12:52 by void             ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -19,9 +19,39 @@
 ** int getrlimit(int resource, struct rlimit *rlim);
 */
 
-/* TINY_MAX and SMALL_MAX must be multiple of 16 */
+/* TINY_MAX and SMALL_MAX must be multiple of 16 and superior to 16 */
+#ifndef TINY_MAX
 #define TINY_MAX 4096
+#endif
+
+#ifndef SMALL_MAX
 #define SMALL_MAX 262144
+#endif
+
+/* By default malloc is thread safe, define this to change this behavior */
+/* #define MALLOC_NO_LOCK */
+
+#ifndef MALLOC_NO_LOCK
+static pthread_mutex_t malloc_lock = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+/* In case MAP_ANONYMOUS or MAP_ANON are not defined */
+#ifndef MAP_ANONYMOUS
+#ifdef MAP_ANON
+#define MMAP_CALL(size) mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0)
+#else
+static int dev_zero_fd = -1;
+#define MMAP_CALL(size)										\
+	do														\
+	{														\
+		if (dev_zero_fd < 0)								\
+			open("/dev/zero", O_RDWR);						\
+		mmap(NULL, PROT_READ | PROT_WRITE, MAP_PRIVATE);	\
+	} while (0)
+#endif
+#else
+#define MMAP_CALL(size) mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+#endif
 
 typedef struct	heap_chunk
 {
@@ -62,14 +92,14 @@ typedef struct	heap_page
 
 #define get_infos_size(infos) (infos & ~(INUSE_BIT | SMALL_BIT | INUSE_BIT | END_BIT))
 
-#define next_chunk(chunk) ((hchunk *)((unsigned char *)chunk + get_infos_size(chunk->infos) - (sizeof(hchunk *) * 2)))
+#define next_chunk(chunk) ((hchunk *)((unsigned char *)chunk + get_infos_size(chunk->infos) + (sizeof(hchunk *) * 2)))
 #define prev_chunk(chunk) ((hchunk *)((unsigned char *)chunk - get_infos_size(chunk->prev_tail) - (sizeof(size_t) * 2)))
 
 #define get_chunk_tail(chunk) (((hchunk *)((unsigned char *)chunk + (sizeof(size_t) * 2) + get_infos_size(chunk->infos)))->prev_tail)
 
 #define get_infos_from_ptr(ptr) ((size_t)*((unsigned char *)ptr - sizeof(size_t)))
 
-#define get_chunk(ptr) ((hchunk *)((unsigned char *)ptr - sizeof(hchunk)))
+#define get_chunk(ptr) ((hchunk *)((unsigned char *)ptr - (sizeof(size_t) * 2)))
 #define get_large_chunk(ptr) ((hpage *)((unsigned char *)ptr - sizeof(hpage)))
 
 #define get_chunk_page(chunk) ((hpage *)((unsigned char *)chunk - sizeof(hpage *)))
@@ -83,6 +113,37 @@ static hpage *lheap = NULL;
 
 static hchunk	*tbins[TBINS_SIZE];
 static hchunk	*sbins[SBINS_SIZE];
+
+static size_t ft_count_recurs(size_t nbr)
+{
+	if (nbr)
+		return (ft_count_recurs(nbr / 10) + 1);
+	return (0);
+}
+
+static void		ft_recurs(char *ret, size_t nbr, size_t i)
+{
+	if (nbr)
+	{
+		ft_recurs(ret, nbr / 10, i - 1);
+		ret[i] = (nbr % 10) + 48;
+	}
+}
+
+static void ft_putnbr(size_t i)
+{
+	if (i == 0)
+	{
+		write(1, "0\n", 2);
+		return;
+	}
+	char arr[500];
+	size_t size = ft_count_recurs(i);
+	arr[size] = 0;
+	ft_recurs(arr, i, size - 1);
+	write(1, arr, size);
+	write(1, "\n", 1);
+}
 
 static void	bzero_bins(hchunk **bins, size_t size)
 {
@@ -125,10 +186,11 @@ static void	add_chunk_to_bins(size_t size, size_t bin_size, hchunk **bins, hchun
 
 static hpage	*new_heap(const int pagesize, size_t alloc_max_size, hchunk **bins, size_t bin_size)
 {
+	write(1, "new_heap\n", 9);
 	size_t size = (alloc_max_size + sizeof(hchunk)) * 100 + sizeof(hpage); // Verifier overflow
 	size = size + pagesize - (size % pagesize);
 
-	void *nheap = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	void *nheap = MMAP_CALL(size);
 	if ((hpage *)nheap == MAP_FAILED)
 		return (NULL);
 
@@ -139,8 +201,6 @@ static hpage	*new_heap(const int pagesize, size_t alloc_max_size, hchunk **bins,
 	((hpage *)nheap)->next = NULL;
 
 	/* Initializing the chunk */
-	size_t oldsize = size;
-	(void)oldsize;
 	size = (size - sizeof(hpage *)) - (sizeof(size_t) * 2);
 	hchunk *chunk = (hchunk *)((unsigned char *)nheap + sizeof(hpage *));
 	chunk->infos = size;
@@ -155,18 +215,12 @@ static hpage	*new_heap(const int pagesize, size_t alloc_max_size, hchunk **bins,
 
 static void	remove_from_bins(hchunk *ch, hchunk **bins, size_t bindex)
 {
-	if (ch->prev != NULL)
-	{
-		ch->prev->next = ch->next;
-		if (ch->next != NULL)
+	if (ch->next != NULL)
 		ch->next->prev = ch->prev;
-	}
+	if (ch->prev != NULL)
+		ch->prev->next = ch->next;
 	else
-	{
 		bins[bindex] = ch->next;
-		if (ch->next != NULL)
-			ch->next->prev = NULL;
-	}
 }
 
 static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_max_size, size_t bin_size, const int pagesize)
@@ -184,7 +238,7 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 	/* If no bin found, create new page */
 	if (bindex >= bin_size)
 	{
-	write(1, "A\n", 2);
+		write(1, "No bin found\n", 13);
 		hpage *pcurr = heap;
 		while (pcurr->next != NULL)
 			pcurr = pcurr->next;
@@ -192,7 +246,10 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 		if (pcurr->next == NULL)
 			return (NULL);
 		curr = (hchunk *)((unsigned char *)pcurr->next + sizeof(hpage *));
-		remove_from_bins(curr, bins, size / 16 - 1);
+		size = size / 16 - 1;
+		if (size >= bin_size)
+			size = bin_size - 1;
+		remove_from_bins(curr, bins, size);
 	}
 	else
 	{
@@ -200,18 +257,21 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 		do
 		{
 			curr = bins[bindex];
-	write(1, "G\n", 2);
-			while (curr->next != NULL && get_infos_size(curr->next->infos) <= size)
-				curr = curr->next;
-	write(1, "H\n", 2);
-			if (curr->next == NULL && get_infos_size(curr->infos) < size)
+			hchunk *tmp = curr;
+			while (tmp && get_infos_size(tmp->infos) <= size)
+			{
+				curr = tmp;
+				tmp = tmp->next;
+			}
+			if (get_infos_size(curr->infos) < size)
 				while (++bindex < bin_size && bins[bindex] == NULL)
 					;
 		} while (get_infos_size(curr->infos) < size && bindex < bin_size);
 
 		/* If no chunk of the correct size is found, create new page */
-		if (bindex == bin_size)
+		if (bindex >= bin_size)
 		{
+			write(1, "No chunk found\n", 15);
 			hpage *pcurr = heap;
 			while (pcurr->next != NULL)
 				pcurr = pcurr->next;
@@ -219,25 +279,31 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 			if (pcurr->next == NULL)
 				return (NULL);
 			curr = (hchunk *)((unsigned char *)pcurr->next + sizeof(hpage *));
-			remove_from_bins(curr, bins, size / 16 - 1);
+			size = size / 16 - 1;
+			if (size >= bin_size)
+				size = bin_size - 1;
+			remove_from_bins(curr, bins, size);
 		}
 		else
 		{
 			/* Otherwise return the chunk found */
-			if (curr->next != NULL)
-				curr = curr->next;
 			remove_from_bins(curr, bins, bindex);
 		}
 	}
 	return (curr);
 }
 
-static void	split_chunk(hchunk *elem, size_t size, hchunk **bins)
+static void	split_chunk(hchunk *elem, size_t size, hchunk **bins, size_t bin_size)
 {
-	hchunk *split = (hchunk *)((unsigned char *)elem + sizeof(size_t) * 2 + size);
+	write(1, "split_chunk\n", 12);
+	if (size < 16)
+		size = 16;
+	else
+		size = size + 16 - (size % 16);
+	hchunk *split = (hchunk *)((unsigned char *)elem + (sizeof(size_t) * 2) + size);
 
 	split->prev_tail = size;
-	split->infos = get_infos_size(elem->infos) - size - sizeof(size_t) * 2;
+	split->infos = get_infos_size(elem->infos) - size - (sizeof(size_t) * 2);
 	elem->infos = size;
 	if (is_end(get_chunk_tail(split)))
 	{
@@ -248,6 +314,8 @@ static void	split_chunk(hchunk *elem, size_t size, hchunk **bins)
 		get_chunk_tail(split) = split->infos;
 
 	size_t bindex = split->infos / 16 - 1;
+	if (bindex >= bin_size)
+		bindex = bin_size - 1;
 	if (bins[bindex] == NULL)
 	{
 		bins[bindex] = split;
@@ -285,6 +353,11 @@ void	*malloc(size_t size)
 
 	const int pagesize = getpagesize();
 	void *ret;
+	ft_putnbr(size);
+
+	#ifndef MALLOC_NO_LOCK
+	pthread_mutex_lock(&malloc_lock);
+	#endif
 
 	/* For tiny and small sizes, return an address in one of the corresponding heaps */
 	if (size <= TINY_MAX)
@@ -292,22 +365,33 @@ void	*malloc(size_t size)
 		write(1, "mtiny\n", 6);
 		if (theap == NULL)
 		{
+			write(1, "theap == NULL\n", 14);
 			bzero_bins(tbins, TBINS_SIZE);
 			theap = new_heap(pagesize, TINY_MAX, tbins, TBINS_SIZE);
 			if (theap == NULL)
+			{
+				#ifndef MALLOC_NO_LOCK
+				pthread_mutex_unlock(&malloc_lock);
+				#endif
 				return (NULL);
+			}
 		}
 
 		hchunk *curr = find_chunk(size, theap, tbins, TINY_MAX, TBINS_SIZE, pagesize);
 		if (curr == NULL)
+		{
+			#ifndef MALLOC_NO_LOCK
+			pthread_mutex_unlock(&malloc_lock);
+			#endif
 			return (NULL);
-
+		}
+		
 		if (get_infos_size(curr->infos) - size >= sizeof(hchunk))
-			split_chunk(curr, size, tbins);
+			split_chunk(curr, size, tbins, TBINS_SIZE);
 		set_inuse(curr->infos);
 		set_inuse(get_chunk_tail(curr));
 
-		ret = (void *)(curr + (sizeof(size_t) * 2));
+		ret = (void *)((unsigned char *)curr + (sizeof(size_t) * 2));
 	}
 	else if (0 && size <= SMALL_MAX)
 	{
@@ -317,15 +401,25 @@ void	*malloc(size_t size)
 			bzero_bins(sbins, SBINS_SIZE);
 			sheap = new_heap(pagesize, SMALL_MAX, sbins, SBINS_SIZE);
 			if (sheap == NULL)
+			{
+				#ifndef MALLOC_NO_LOCK
+				pthread_mutex_unlock(&malloc_lock);
+				#endif
 				return (NULL);
+			}
 		}
 
 		hchunk *curr = find_chunk(size, sheap, sbins, SMALL_MAX, SBINS_SIZE, pagesize);
 		if (curr == NULL)
+		{
+			#ifndef MALLOC_NO_LOCK
+			pthread_mutex_unlock(&malloc_lock);
+			#endif
 			return (NULL);
+		}
 
 		if (get_infos_size(curr->infos) - size >= sizeof(hchunk))
-			split_chunk(curr, size, sbins);
+			split_chunk(curr, size, sbins, SBINS_SIZE);
 		set_inuse(curr->infos);
 		set_inuse(get_chunk_tail(curr));
 		set_small(curr->infos);
@@ -341,6 +435,9 @@ void	*malloc(size_t size)
 		if (size > SIZE_MAX - sizeof(hpage))
 		{
 			errno = ENOMEM;
+			#ifndef MALLOC_NO_LOCK
+			pthread_mutex_unlock(&malloc_lock);
+			#endif
 			return (NULL);
 		}
 		size_t large_size = size + sizeof(hpage);
@@ -348,13 +445,21 @@ void	*malloc(size_t size)
 		if (SIZE_MAX - large_size > (size_t)pagesize)
 		{
 			errno = ENOMEM;
+			#ifndef MALLOC_NO_LOCK
+			pthread_mutex_unlock(&malloc_lock);
+			#endif
 			return (NULL);
 		}
 		large_size = large_size + pagesize;
 
-		ret = mmap(NULL, large_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		ret = MMAP_CALL(large_size);
 		if (ret == MAP_FAILED)
+		{
+			#ifndef MALLOC_NO_LOCK
+			pthread_mutex_unlock(&malloc_lock);
+			#endif
 			return (NULL);
+		}
 
 		((hpage *)ret)->infos = large_size;
 		set_large(((hpage *)ret)->infos);
@@ -372,13 +477,20 @@ void	*malloc(size_t size)
 
 		ret = (unsigned char *)ret + sizeof(hpage);
 	}
+	ft_putnbr((size_t)ret);
+
+	#ifndef MALLOC_NO_LOCK
+	pthread_mutex_unlock(&malloc_lock);
+	#endif
+
 	return (ret);
 }
 
-static void	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage *heap)
+static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_size)
 {
 	if (is_inuse(chunk->prev_tail) == 0)
 	{
+		write(1, "defrag prev\n", 12);
 		/* Defragments with previous chunk */
 		hchunk *prev = prev_chunk(chunk);
 
@@ -397,6 +509,8 @@ static void	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage *heap)
 		else
 		{
 			size_t bindex = prev->infos / 16 - 1;
+			if (bindex >= bin_size)
+				bindex = bin_size - 1;
 			bins[bindex] = NULL;
 		}
 		chunk = prev;
@@ -404,12 +518,12 @@ static void	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage *heap)
 
 	if (is_end(get_chunk_tail(chunk)) == 0)
 	{
-		if (is_inuse(chunk->prev_tail) == 0)
+		hchunk *next = next_chunk(chunk);
+		if (is_inuse(next->infos) == 0)
 		{
+			write(1, "defrag next\n", 12);
 			/* Defragments with next chunk */
-			hchunk *next = next_chunk(chunk);
-
-			chunk->infos = get_infos_size(chunk->infos) + get_infos_size(next->infos);
+			chunk->infos = get_infos_size(chunk->infos) + get_infos_size(next->infos) + (sizeof(size_t) * 2);
 			if (is_end(get_chunk_tail(next)))
 			{
 				get_chunk_tail(next) = chunk->infos;
@@ -417,42 +531,49 @@ static void	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage *heap)
 			}
 			else
 				get_chunk_tail(next) = chunk->infos;
+	write(1, "G\n", 2);
 			if (next->next != NULL)
 				next->next->prev = next->prev;
+	write(1, "H\n", 2);
 			if (next->prev != NULL)
 				next->prev->next = next->next;
 			else
 			{
 				size_t bindex = chunk->infos / 16 - 1;
+				if (bindex >= bin_size)
+					bindex = bin_size - 1;
 				bins[bindex] = NULL;
 			}
 		}
 	}
 
 	/* Check if the page is empty and there is more than one page in the heap */
-	if (is_end(get_chunk_tail(chunk)))
+	if (is_end(get_chunk_tail(chunk)) && is_end(chunk->prev_tail))
 	{
+		write(1, "empty page\n", 11);
 		/* If so, munmaps it */
 		hpage *p = get_chunk_page(chunk);
-		hpage *curr = heap;
+		hpage *curr = *heap;
 		hpage *prev = curr;
 
 		while (curr != NULL)
 		{
 			if (curr == p)
 			{
-				if (curr->next != NULL || heap != curr)
+				if (curr->next != NULL || *heap != curr)
 				{
-					if (heap == curr)
-						heap = curr->next;
+					if (*heap == curr)
+						*heap = curr->next;
 					prev->next = curr->next;
+					write(1, "munmap page\n", 12);
 					if (munmap(curr, get_infos_size(curr->infos)) < 0)
 					{
-						if (heap == curr->next)
-							heap = curr;
+						if (*heap == curr->next)
+							*heap = curr;
 						prev->next = curr;
+						return (0);
 					}
-					return;
+					return (1);
 				}
 				break;
 			}
@@ -460,11 +581,18 @@ static void	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage *heap)
 			curr = curr->next;
 		}
 	}
+	return (0);
 }
 
 void	free(void *ptr)
 {
 	write(1, "free\n", 5);
+	ft_putnbr((size_t)ptr);
+
+	#ifndef MALLOC_NO_LOCK
+	pthread_mutex_lock(&malloc_lock);
+	#endif
+
 	if (ptr != NULL)
 	{
 		size_t infos = get_infos_from_ptr(ptr); // Vérifier si bien alloué pour tester avec certains programmes
@@ -482,6 +610,9 @@ void	free(void *ptr)
 						prev->next = curr->next;
 					if (munmap(ptr, get_infos_size(page->infos)) < 0)
 						prev->next = curr;
+					#ifndef MALLOC_NO_LOCK
+					pthread_mutex_unlock(&malloc_lock);
+					#endif
 					return;
 				}
 				prev = curr;
@@ -493,9 +624,15 @@ void	free(void *ptr)
 			write(1, "fsmall\n", 7);
 			hchunk *chunk = get_chunk(ptr);
 
-			free_ts_chunk(chunk, sbins, sheap);
+			if (free_ts_chunk(chunk, sbins, &sheap, SBINS_SIZE) == 1)
+			{
+				#ifndef MALLOC_NO_LOCK
+				pthread_mutex_unlock(&malloc_lock);
+				#endif
+				return;
+			}
 
-			/* Otherwise add the new chunk to the bins */
+			/* If heap wasn't munmap() add the new chunk to the bins */
 			add_chunk_to_bins(get_infos_size(chunk->infos), SBINS_SIZE, sbins, chunk);
 		}
 		else
@@ -503,14 +640,27 @@ void	free(void *ptr)
 			write(1, "ftiny\n", 6);
 			hchunk *chunk = get_chunk(ptr);
 
-			free_ts_chunk(chunk, sbins, sheap);
+			write(1, "Z\n", 2);
+			if (free_ts_chunk(chunk, tbins, &theap, TBINS_SIZE) == 1)
+			{
+				#ifndef MALLOC_NO_LOCK
+				pthread_mutex_unlock(&malloc_lock);
+				#endif
+				return;
+			}
 
-			/* Otherwise add the new chunk to the bins */
-			add_chunk_to_bins(get_infos_size(chunk->infos), SBINS_SIZE, sbins, chunk);
+			write(1, "X\n", 2);
+			/* If heap wasn't munmap() add the new chunk to the bins */
+			add_chunk_to_bins(get_infos_size(chunk->infos), TBINS_SIZE, tbins, chunk);
+			write(1, "C\n", 2);
 		}
 	}
 	else
 		write(1, "ptr = NULL\n", 11);
+
+	#ifndef MALLOC_NO_LOCK
+	pthread_mutex_unlock(&malloc_lock);
+	#endif
 }
 
 void	*realloc(void *ptr, size_t size)
@@ -520,6 +670,10 @@ void	*realloc(void *ptr, size_t size)
 	size_t ptr_size = 0;
 	if (ptr != NULL)
 	{
+		#ifndef MALLOC_NO_LOCK
+		pthread_mutex_lock(&malloc_lock);
+		#endif
+
 		size_t infos = get_infos_from_ptr(ptr); // Vérifier si bien alloué pour tester avec certains programmes
 		ptr_size = get_infos_size(infos);
 
@@ -531,6 +685,10 @@ void	*realloc(void *ptr, size_t size)
 		{
 			; // Regarder si le chunk suivant à assez de place
 		}
+
+		#ifndef MALLOC_NO_LOCK
+		pthread_mutex_unlock(&malloc_lock);
+		#endif
 	}
 
 	void *ret = malloc(size);
@@ -588,10 +746,26 @@ void	*calloc(size_t nmemb, size_t size)
 
 void	show_alloc_mem(void)
 {
+	#ifndef MALLOC_NO_LOCK
+	pthread_mutex_lock(&malloc_lock);
+	#endif
+
 	write(1, "show_alloc_mem()\n", 17);
+
+	#ifndef MALLOC_NO_LOCK
+	pthread_mutex_unlock(&malloc_lock);
+	#endif
 }
 
 void	show_alloc_mem_ex(void)
 {
+	#ifndef MALLOC_NO_LOCK
+	pthread_mutex_lock(&malloc_lock);
+	#endif
+
 	write(1, "show_alloc_mem_ex()\n", 20);
+
+	#ifndef MALLOC_NO_LOCK
+	pthread_mutex_unlock(&malloc_lock);
+	#endif
 }
