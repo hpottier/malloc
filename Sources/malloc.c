@@ -6,7 +6,7 @@
 /*   By: hpottier <hpottier@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/02/18 16:58:54 by hpottier          #+#    #+#             */
-/*   Updated: 2022/03/26 09:12:52 by void             ###   ########.fr       */
+/*   Updated: 2022/04/07 14:48:49 by hpottier         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -494,7 +494,7 @@ static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_
 		/* Defragments with previous chunk */
 		hchunk *prev = prev_chunk(chunk);
 
-		prev->infos = get_infos_size(prev->infos) + get_infos_size(chunk->infos);
+		prev->infos = get_infos_size(prev->infos) + get_infos_size(chunk->infos) + (sizeof(size_t) * 2);
 		if (is_end(get_chunk_tail(chunk)))
 		{
 			get_chunk_tail(chunk) = prev->infos;
@@ -513,6 +513,8 @@ static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_
 				bindex = bin_size - 1;
 			bins[bindex] = NULL;
 		}
+		prev->next = NULL;
+		prev->prev = NULL;
 		chunk = prev;
 	}
 
@@ -523,7 +525,7 @@ static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_
 		{
 			write(1, "defrag next\n", 12);
 			/* Defragments with next chunk */
-			chunk->infos = get_infos_size(chunk->infos) + get_infos_size(next->infos) + (sizeof(size_t) * 2);
+			chunk->infos = get_infos_size(next->infos) + get_infos_size(chunk->infos) + (sizeof(size_t) * 2);
 			if (is_end(get_chunk_tail(next)))
 			{
 				get_chunk_tail(next) = chunk->infos;
@@ -531,10 +533,8 @@ static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_
 			}
 			else
 				get_chunk_tail(next) = chunk->infos;
-	write(1, "G\n", 2);
 			if (next->next != NULL)
 				next->next->prev = next->prev;
-	write(1, "H\n", 2);
 			if (next->prev != NULL)
 				next->prev->next = next->next;
 			else
@@ -544,6 +544,8 @@ static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_
 					bindex = bin_size - 1;
 				bins[bindex] = NULL;
 			}
+			next->next = NULL;
+			next->prev = NULL;
 		}
 	}
 
@@ -640,7 +642,6 @@ void	free(void *ptr)
 			write(1, "ftiny\n", 6);
 			hchunk *chunk = get_chunk(ptr);
 
-			write(1, "Z\n", 2);
 			if (free_ts_chunk(chunk, tbins, &theap, TBINS_SIZE) == 1)
 			{
 				#ifndef MALLOC_NO_LOCK
@@ -649,10 +650,8 @@ void	free(void *ptr)
 				return;
 			}
 
-			write(1, "X\n", 2);
 			/* If heap wasn't munmap() add the new chunk to the bins */
 			add_chunk_to_bins(get_infos_size(chunk->infos), TBINS_SIZE, tbins, chunk);
-			write(1, "C\n", 2);
 		}
 	}
 	else
