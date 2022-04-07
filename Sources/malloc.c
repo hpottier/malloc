@@ -6,7 +6,7 @@
 /*   By: hpottier <hpottier@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/02/18 16:58:54 by hpottier          #+#    #+#             */
-/*   Updated: 2022/04/07 14:48:49 by hpottier         ###   ########.fr       */
+/*   Updated: 2022/04/07 17:41:16 by hpottier         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -172,15 +172,25 @@ static void	add_chunk_to_bins(size_t size, size_t bin_size, hchunk **bins, hchun
 		if (get_infos_size(curr->infos) > get_infos_size(chunk->infos))
 			while (curr->next != NULL && get_infos_size(curr->next->infos) <= get_infos_size(chunk->infos))
 				curr = curr->next;
-		if (curr->next != NULL)
+		if (curr == bins[bindex])
 		{
-			curr->next->prev = chunk;
-			chunk->next = curr->next;
+			bins[bindex] = chunk;
+			chunk->prev = NULL;
+			chunk->next = curr;
+			curr->prev = chunk;
 		}
 		else
-			chunk->next = NULL;
-		curr->next = chunk;
-		chunk->prev = curr;
+		{
+			if (curr->next != NULL)
+			{
+				curr->next->prev = chunk;
+				chunk->next = curr->next;
+			}
+			else
+				chunk->next = NULL;
+			curr->next = chunk;
+			chunk->prev = curr;
+		}
 	}
 }
 
@@ -225,7 +235,7 @@ static void	remove_from_bins(hchunk *ch, hchunk **bins, size_t bindex)
 
 static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_max_size, size_t bin_size, const int pagesize)
 {
-	hchunk *curr;
+	hchunk *curr = NULL;
 	size_t bindex = size / 16 - 1;
 
 	if (bindex >= bin_size)
@@ -253,11 +263,16 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 	}
 	else
 	{
-		/* Search inside the bin for a chunk of the correct size and move to next bins if non found */
+		/* Searching inside the bin for a chunk of the correct size and move to next bins if non found */
+	write(1, "AAAAA\n", 6);
 		do
 		{
+	write(1, "GGGGG\n", 6);
 			curr = bins[bindex];
 			hchunk *tmp = curr;
+			ft_putnbr((size_t)curr);
+			ft_putnbr((size_t)curr->next);
+			ft_putnbr((size_t)curr->prev);
 			while (tmp && get_infos_size(tmp->infos) <= size)
 			{
 				curr = tmp;
@@ -267,6 +282,7 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 				while (++bindex < bin_size && bins[bindex] == NULL)
 					;
 		} while (get_infos_size(curr->infos) < size && bindex < bin_size);
+	write(1, "ZZZZZ\n", 6);
 
 		/* If no chunk of the correct size is found, create new page */
 		if (bindex >= bin_size)
@@ -279,16 +295,11 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 			if (pcurr->next == NULL)
 				return (NULL);
 			curr = (hchunk *)((unsigned char *)pcurr->next + sizeof(hpage *));
-			size = size / 16 - 1;
-			if (size >= bin_size)
-				size = bin_size - 1;
-			remove_from_bins(curr, bins, size);
+			bindex = size / 16 - 1;
+			if (bindex >= bin_size)
+				bindex = bin_size - 1;
 		}
-		else
-		{
-			/* Otherwise return the chunk found */
-			remove_from_bins(curr, bins, bindex);
-		}
+		remove_from_bins(curr, bins, bindex);
 	}
 	return (curr);
 }
@@ -482,7 +493,7 @@ void	*malloc(size_t size)
 	#ifndef MALLOC_NO_LOCK
 	pthread_mutex_unlock(&malloc_lock);
 	#endif
-
+	write(1, "\n", 1);
 	return (ret);
 }
 
@@ -513,8 +524,6 @@ static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_
 				bindex = bin_size - 1;
 			bins[bindex] = NULL;
 		}
-		prev->next = NULL;
-		prev->prev = NULL;
 		chunk = prev;
 	}
 
@@ -544,8 +553,6 @@ static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_
 					bindex = bin_size - 1;
 				bins[bindex] = NULL;
 			}
-			next->next = NULL;
-			next->prev = NULL;
 		}
 	}
 
@@ -615,6 +622,7 @@ void	free(void *ptr)
 					#ifndef MALLOC_NO_LOCK
 					pthread_mutex_unlock(&malloc_lock);
 					#endif
+	write(1, "\n", 1);
 					return;
 				}
 				prev = curr;
@@ -631,6 +639,7 @@ void	free(void *ptr)
 				#ifndef MALLOC_NO_LOCK
 				pthread_mutex_unlock(&malloc_lock);
 				#endif
+	write(1, "\n", 1);
 				return;
 			}
 
@@ -647,6 +656,7 @@ void	free(void *ptr)
 				#ifndef MALLOC_NO_LOCK
 				pthread_mutex_unlock(&malloc_lock);
 				#endif
+	write(1, "\n", 1);
 				return;
 			}
 
@@ -657,6 +667,7 @@ void	free(void *ptr)
 	else
 		write(1, "ptr = NULL\n", 11);
 
+	write(1, "\n", 1);
 	#ifndef MALLOC_NO_LOCK
 	pthread_mutex_unlock(&malloc_lock);
 	#endif
