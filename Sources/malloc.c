@@ -6,7 +6,7 @@
 /*   By: hpottier <hpottier@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/02/18 16:58:54 by hpottier          #+#    #+#             */
-/*   Updated: 2022/04/07 17:41:16 by hpottier         ###   ########.fr       */
+/*   Updated: 2022/04/08 17:27:52 by hpottier         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -29,7 +29,7 @@
 #endif
 
 /* By default malloc is thread safe, define this to change this behavior */
-/* #define MALLOC_NO_LOCK */
+#define MALLOC_NO_LOCK
 
 #ifndef MALLOC_NO_LOCK
 static pthread_mutex_t malloc_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -145,6 +145,20 @@ static void ft_putnbr(size_t i)
 	write(1, "\n", 1);
 }
 
+static size_t ft_strlen(char *str)
+{
+	size_t x = 0;
+
+	while (str[x])
+		++x;
+	return (x);
+}
+
+static void ft_putstr(char *str)
+{
+	write(1, str, ft_strlen(str));
+}
+
 static void	bzero_bins(hchunk **bins, size_t size)
 {
 	hchunk **end = bins + size;
@@ -196,7 +210,6 @@ static void	add_chunk_to_bins(size_t size, size_t bin_size, hchunk **bins, hchun
 
 static hpage	*new_heap(const int pagesize, size_t alloc_max_size, hchunk **bins, size_t bin_size)
 {
-	write(1, "new_heap\n", 9);
 	size_t size = (alloc_max_size + sizeof(hchunk)) * 100 + sizeof(hpage); // Verifier overflow
 	size = size + pagesize - (size % pagesize);
 
@@ -248,7 +261,6 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 	/* If no bin found, create new page */
 	if (bindex >= bin_size)
 	{
-		write(1, "No bin found\n", 13);
 		hpage *pcurr = heap;
 		while (pcurr->next != NULL)
 			pcurr = pcurr->next;
@@ -264,15 +276,10 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 	else
 	{
 		/* Searching inside the bin for a chunk of the correct size and move to next bins if non found */
-	write(1, "AAAAA\n", 6);
 		do
 		{
-	write(1, "GGGGG\n", 6);
 			curr = bins[bindex];
 			hchunk *tmp = curr;
-			ft_putnbr((size_t)curr);
-			ft_putnbr((size_t)curr->next);
-			ft_putnbr((size_t)curr->prev);
 			while (tmp && get_infos_size(tmp->infos) <= size)
 			{
 				curr = tmp;
@@ -282,12 +289,10 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 				while (++bindex < bin_size && bins[bindex] == NULL)
 					;
 		} while (get_infos_size(curr->infos) < size && bindex < bin_size);
-	write(1, "ZZZZZ\n", 6);
 
 		/* If no chunk of the correct size is found, create new page */
 		if (bindex >= bin_size)
 		{
-			write(1, "No chunk found\n", 15);
 			hpage *pcurr = heap;
 			while (pcurr->next != NULL)
 				pcurr = pcurr->next;
@@ -306,7 +311,6 @@ static hchunk	*find_chunk(size_t size, hpage *heap, hchunk **bins, size_t alloc_
 
 static void	split_chunk(hchunk *elem, size_t size, hchunk **bins, size_t bin_size)
 {
-	write(1, "split_chunk\n", 12);
 	if (size < 16)
 		size = 16;
 	else
@@ -358,25 +362,22 @@ static void	split_chunk(hchunk *elem, size_t size, hchunk **bins, size_t bin_siz
 
 void	*malloc(size_t size)
 {
-	write(1, "malloc\n", 7);
+	//ft_putstr("malloc\n");
 	if (size == 0)
 		return (NULL);
 
 	const int pagesize = getpagesize();
 	void *ret;
-	ft_putnbr(size);
 
 	#ifndef MALLOC_NO_LOCK
 	pthread_mutex_lock(&malloc_lock);
 	#endif
-
 	/* For tiny and small sizes, return an address in one of the corresponding heaps */
 	if (size <= TINY_MAX)
 	{
-		write(1, "mtiny\n", 6);
+		//ft_putstr("tiny\n");
 		if (theap == NULL)
 		{
-			write(1, "theap == NULL\n", 14);
 			bzero_bins(tbins, TBINS_SIZE);
 			theap = new_heap(pagesize, TINY_MAX, tbins, TBINS_SIZE);
 			if (theap == NULL)
@@ -406,7 +407,7 @@ void	*malloc(size_t size)
 	}
 	else if (0 && size <= SMALL_MAX)
 	{
-		write(1, "msmall\n", 7);
+		//ft_putstr("small\n");
 		if (sheap == NULL)
 		{
 			bzero_bins(sbins, SBINS_SIZE);
@@ -440,8 +441,8 @@ void	*malloc(size_t size)
 	else
 	{
 		/* If size is over SMALL_MAX just return a new map of the correct size */
-		write(1, "mlarge\n", 7);
 
+		//ft_putstr("large\n");
 		/* Dealing with overflows */
 		if (size > SIZE_MAX - sizeof(hpage))
 		{
@@ -453,7 +454,7 @@ void	*malloc(size_t size)
 		}
 		size_t large_size = size + sizeof(hpage);
 		large_size = large_size - (large_size % pagesize);
-		if (SIZE_MAX - large_size > (size_t)pagesize)
+		if (SIZE_MAX - large_size < (size_t)pagesize)
 		{
 			errno = ENOMEM;
 			#ifndef MALLOC_NO_LOCK
@@ -471,7 +472,7 @@ void	*malloc(size_t size)
 			#endif
 			return (NULL);
 		}
-
+	
 		((hpage *)ret)->infos = large_size;
 		set_large(((hpage *)ret)->infos);
 		((hpage *)ret)->next = NULL;
@@ -488,12 +489,11 @@ void	*malloc(size_t size)
 
 		ret = (unsigned char *)ret + sizeof(hpage);
 	}
-	ft_putnbr((size_t)ret);
 
 	#ifndef MALLOC_NO_LOCK
 	pthread_mutex_unlock(&malloc_lock);
 	#endif
-	write(1, "\n", 1);
+	//ft_putstr("fin\n\n");
 	return (ret);
 }
 
@@ -501,9 +501,14 @@ static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_
 {
 	if (is_inuse(chunk->prev_tail) == 0)
 	{
-		write(1, "defrag prev\n", 12);
 		/* Defragments with previous chunk */
 		hchunk *prev = prev_chunk(chunk);
+
+		size_t bindex = get_infos_size(prev->infos) / 16 - 1;
+
+		if (bindex >= bin_size)
+			bindex = bin_size - 1;
+		remove_from_bins(prev, bins, bindex);
 
 		prev->infos = get_infos_size(prev->infos) + get_infos_size(chunk->infos) + (sizeof(size_t) * 2);
 		if (is_end(get_chunk_tail(chunk)))
@@ -532,8 +537,13 @@ static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_
 		hchunk *next = next_chunk(chunk);
 		if (is_inuse(next->infos) == 0)
 		{
-			write(1, "defrag next\n", 12);
 			/* Defragments with next chunk */
+			size_t bindex = get_infos_size(next->infos) / 16 - 1;
+
+			if (bindex >= bin_size)
+				bindex = bin_size - 1;
+			remove_from_bins(next, bins, bindex);
+
 			chunk->infos = get_infos_size(next->infos) + get_infos_size(chunk->infos) + (sizeof(size_t) * 2);
 			if (is_end(get_chunk_tail(next)))
 			{
@@ -559,7 +569,6 @@ static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_
 	/* Check if the page is empty and there is more than one page in the heap */
 	if (is_end(get_chunk_tail(chunk)) && is_end(chunk->prev_tail))
 	{
-		write(1, "empty page\n", 11);
 		/* If so, munmaps it */
 		hpage *p = get_chunk_page(chunk);
 		hpage *curr = *heap;
@@ -574,7 +583,6 @@ static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_
 					if (*heap == curr)
 						*heap = curr->next;
 					prev->next = curr->next;
-					write(1, "munmap page\n", 12);
 					if (munmap(curr, get_infos_size(curr->infos)) < 0)
 					{
 						if (*heap == curr->next)
@@ -593,10 +601,35 @@ static int	free_ts_chunk(hchunk *chunk, hchunk **bins, hpage **heap, size_t bin_
 	return (0);
 }
 
+static int check_if_malloc(void *ptr)
+{
+	hpage *curr = theap;
+	while (curr != NULL)
+	{
+		if ((size_t)curr < (size_t)ptr && (size_t)ptr < ((size_t)curr + get_infos_size(curr->infos)))
+			return (1);
+		curr = curr->next;
+	}
+	curr = sheap;
+	while (curr != NULL)
+	{
+		if ((size_t)curr < (size_t)ptr && (size_t)ptr < ((size_t)curr + get_infos_size(curr->infos)))
+			return (2);
+		curr = curr->next;
+	}
+	curr = lheap;
+	while (curr != NULL)
+	{
+		if ((size_t)curr < (size_t)ptr && (size_t)ptr < ((size_t)curr + get_infos_size(curr->infos)))
+			return (3);
+		curr = curr->next;
+	}
+	return (0);
+}
+
 void	free(void *ptr)
 {
-	write(1, "free\n", 5);
-	ft_putnbr((size_t)ptr);
+	//ft_putstr("free\n");
 
 	#ifndef MALLOC_NO_LOCK
 	pthread_mutex_lock(&malloc_lock);
@@ -604,25 +637,33 @@ void	free(void *ptr)
 
 	if (ptr != NULL)
 	{
-		size_t infos = get_infos_from_ptr(ptr); // Vérifier si bien alloué pour tester avec certains programmes
+		/* Useful to test with programs that might use non standards malloc functions */
+		if (check_if_malloc(ptr) == 0)
+			return;
+		size_t infos = get_infos_from_ptr(ptr);
 		if (is_large(infos) == 1)
 		{
-			write(1, "flarge\n", 7);
 			hpage *page = get_large_chunk(ptr);
 			hpage *curr = lheap;
 			hpage *prev = NULL;
+
 			while (curr != NULL)
 			{
 				if (curr == page)
 				{
 					if (prev != NULL)
 						prev->next = curr->next;
-					if (munmap(ptr, get_infos_size(page->infos)) < 0)
-						prev->next = curr;
+					else
+						lheap = curr->next;
+					if (munmap(page, get_infos_size(page->infos)) < 0)
+					{
+						ft_putstr("munmap() < 0");
+						/* prev->next = curr; */
+					}
 					#ifndef MALLOC_NO_LOCK
 					pthread_mutex_unlock(&malloc_lock);
 					#endif
-	write(1, "\n", 1);
+	//ft_putstr("fin\n\n");
 					return;
 				}
 				prev = curr;
@@ -631,15 +672,13 @@ void	free(void *ptr)
 		}
 		else if (is_small(infos) == 1)
 		{
-			write(1, "fsmall\n", 7);
 			hchunk *chunk = get_chunk(ptr);
-
 			if (free_ts_chunk(chunk, sbins, &sheap, SBINS_SIZE) == 1)
 			{
 				#ifndef MALLOC_NO_LOCK
 				pthread_mutex_unlock(&malloc_lock);
 				#endif
-	write(1, "\n", 1);
+	//ft_putstr("fin\n\n");
 				return;
 			}
 
@@ -648,15 +687,13 @@ void	free(void *ptr)
 		}
 		else
 		{
-			write(1, "ftiny\n", 6);
 			hchunk *chunk = get_chunk(ptr);
-
 			if (free_ts_chunk(chunk, tbins, &theap, TBINS_SIZE) == 1)
 			{
 				#ifndef MALLOC_NO_LOCK
 				pthread_mutex_unlock(&malloc_lock);
 				#endif
-	write(1, "\n", 1);
+	//ft_putstr("fin\n\n");
 				return;
 			}
 
@@ -664,18 +701,16 @@ void	free(void *ptr)
 			add_chunk_to_bins(get_infos_size(chunk->infos), TBINS_SIZE, tbins, chunk);
 		}
 	}
-	else
-		write(1, "ptr = NULL\n", 11);
 
-	write(1, "\n", 1);
 	#ifndef MALLOC_NO_LOCK
 	pthread_mutex_unlock(&malloc_lock);
 	#endif
+	//ft_putstr("fin\n\n");
 }
 
 void	*realloc(void *ptr, size_t size)
 {
-	write(1, "realloc\n", 8);
+	//ft_putstr("realloc\n");
 
 	size_t ptr_size = 0;
 	if (ptr != NULL)
@@ -713,13 +748,12 @@ void	*realloc(void *ptr, size_t size)
 	}
 
 	free(ptr);
-
 	return (ret);
 }
 
 void	*calloc(size_t nmemb, size_t size)
 {
-	write(1, "calloc\n", 7);
+	//ft_putstr("calloc\n");
 	if (nmemb == 0 || size == 0 || nmemb > SIZE_MAX / size) // (nmemb * size) / nmemb != size
 		return (NULL);
 
