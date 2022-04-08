@@ -6,7 +6,7 @@
 /*   By: hpottier <hpottier@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2022/02/18 16:58:54 by hpottier          #+#    #+#             */
-/*   Updated: 2022/04/08 17:27:52 by hpottier         ###   ########.fr       */
+/*   Updated: 2022/04/08 18:39:13 by hpottier         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -436,7 +436,7 @@ void	*malloc(size_t size)
 		set_inuse(get_chunk_tail(curr));
 		set_small(curr->infos);
 
-		ret = (void *)(curr + (sizeof(size_t) * 2));
+		ret = (void *)((unsigned char *)curr + (sizeof(size_t) * 2));
 	}
 	else
 	{
